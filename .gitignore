@@ -1,6 +1,9 @@
 # I have my assignments here for reference
 Colab_Notebooks
 
+# vscode
+.vscode/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

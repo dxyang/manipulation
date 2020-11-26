@@ -6,6 +6,56 @@ from pydrake.multibody import inverse_kinematics
 
 from .drake_helpers import CreateIiwaControllerPlant
 
+def pose_to_jointangles(T_world_robotPose):
+    plant, _ = CreateIiwaControllerPlant()
+    world_frame = plant.world_frame()
+    gripper_frame = plant.GetFrameByName("body")
+    #q_nominal = np.array([ 0., 0.6, 0., -1.75, 0., 1., 0., 0., 0.]) # nominal joint for joint-centering.
+    q_nominal = np.array([-1.57, 0.1, 0.00, -1.2, 0.00, 1.60, 0.00, 0.00, 0.00])
+
+    def AddOrientationConstraint(ik, R_WG, bounds):
+        ik.AddOrientationConstraint(
+            frameAbar=world_frame, R_AbarA=R_WG,
+            frameBbar=gripper_frame, R_BbarB=RotationMatrix(),
+            theta_bound=bounds
+        )
+
+    def AddPositionConstraint(ik, p_WG_lower, p_WG_upper):
+        ik.AddPositionConstraint(
+            frameA=world_frame, frameB=gripper_frame, p_BQ=np.zeros(3),
+            p_AQ_lower=p_WG_lower, p_AQ_upper=p_WG_upper)
+
+    ik = inverse_kinematics.InverseKinematics(plant)
+    q_variables = ik.q() # Get variables for MathematicalProgram
+    prog = ik.prog() # Get MathematicalProgram
+
+    p_WG = T_world_robotPose.translation()
+    r_WG = T_world_robotPose.rotation()
+
+    # must be an exact solution
+    z_slack = 0
+    degrees_slack = 0
+    AddPositionConstraint(ik, p_WG - np.array([0, 0, z_slack]), p_WG + np.array([0, 0, z_slack]))
+    AddOrientationConstraint(ik, r_WG, degrees_slack * np.pi / 180)
+
+    # todo: add some sort of constraint so that jacobian is 0 in certain directions
+    # (so just joints 4 and 6 move when swung)
+
+    # initial guess
+    prog.SetInitialGuess(q_variables, q_nominal)
+    diff = q_variables - q_nominal
+
+    prog.AddCost(np.sum(diff.dot(diff)))
+
+    result = Solve(prog)
+    if not result.is_success():
+        #visualize_transform(meshcat, "FAIL", X_WG, prefix='', length=0.3, radius=0.02)
+        assert(False) # no IK solution for target
+
+    jas = result.GetSolution(q_variables)
+
+    return jas
+
 def create_q_knots(pose_lst):
     """Convert end-effector pose list to joint position list using series of
     InverseKinematics problems. Note that q is 9-dimensional because the last 2 dimensions

@@ -69,6 +69,20 @@ def interpolatePosesArcMotion_pdot(T_world_poseA, T_world_poseB, t):
 
     return pdot_curr
 
+
+def interpolate_joint_angle(ja1, ja2, time_interval, num_samples):
+    # constant joint velocity over the time interval
+    # naive - let's try not to deal with wrap around and joint velocity limits
+    delta = ja2 - ja1
+    joint_velocities = delta / time_interval
+
+    ja_list = []
+    t_lst = np.linspace(0, time_interval, num_samples, endpoint=False)
+    for t in t_lst:
+        ja_list.append(ja1 + t * joint_velocities)
+    return t_lst, ja_list
+
+
 def get_launch_speed_required(theta, x, y, g=9.81):
     """
     Assuming we launch from (0, 0) at theta (radians),
