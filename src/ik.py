@@ -1,13 +1,71 @@
 import numpy as np
 
 import pydrake
-from pydrake.all import RigidTransform, RotationMatrix, Solve
+from pydrake.all import DiagramBuilder, JacobianWrtVariable, RigidTransform, RotationMatrix, Solve
+from pydrake.examples.manipulation_station import ManipulationStation
 from pydrake.multibody import inverse_kinematics
 
 from .drake_helpers import CreateIiwaControllerPlant
 
+def spatial_velocity_jacobian_at_jointangles(jointangles):
+    # returns a 6 x 7 matrix
+    # [dw_x, dw_y, dw_z, dv_x, dv_y, dv_z] for each of the 7 joints
+
+    # jointangles should be a numpy array or list of joint angles of length 7
+    ja = np.array(jointangles).squeeze()
+    assert(ja.shape == (7,))
+
+    builder = DiagramBuilder()
+    station = builder.AddSystem(ManipulationStation())
+    station.SetupClutterClearingStation()
+    station.Finalize()
+    diagram = builder.Build()
+    context = diagram.CreateDefaultContext()
+    plant = station.get_multibody_plant()
+    plant.SetPositions(
+        plant.GetMyContextFromRoot(context),
+        plant.GetModelInstanceByName("iiwa"),
+        ja
+    )
+    plant_context = plant.GetMyContextFromRoot(context)
+
+    G = plant.GetBodyByName("body").body_frame()
+    W = plant.world_frame()
+    J_G = plant.CalcJacobianSpatialVelocity(
+        plant_context,
+        JacobianWrtVariable.kQDot,
+        G,
+        [0,0,0],
+        W,
+        W
+    )
+    return J_G[:, :7]
+
+def jointangles_to_pose(jointangles):
+    # jointangles should be a numpy array or list of joint angles of length 7
+    ja = np.array(jointangles).squeeze()
+    assert(ja.shape == (7,))
+
+    builder = DiagramBuilder()
+    station = builder.AddSystem(ManipulationStation())
+    station.SetupClutterClearingStation()
+    station.Finalize()
+    diagram = builder.Build()
+    context = diagram.CreateDefaultContext()
+    plant = station.get_multibody_plant()
+    gripper = plant.GetBodyByName("body")
+    plant.SetPositions(
+        plant.GetMyContextFromRoot(context),
+        plant.GetModelInstanceByName("iiwa"),
+        ja
+    )
+    plant_context = plant.GetMyContextFromRoot(context)
+    pose = plant.EvalBodyPoseInWorld(plant_context, gripper)
+    return pose
+
 def pose_to_jointangles(T_world_robotPose):
     plant, _ = CreateIiwaControllerPlant()
+    plant_context = plant.CreateDefaultContext()
     world_frame = plant.world_frame()
     gripper_frame = plant.GetFrameByName("body")
     #q_nominal = np.array([ 0., 0.6, 0., -1.75, 0., 1., 0., 0., 0.]) # nominal joint for joint-centering.
@@ -24,6 +82,23 @@ def pose_to_jointangles(T_world_robotPose):
         ik.AddPositionConstraint(
             frameA=world_frame, frameB=gripper_frame, p_BQ=np.zeros(3),
             p_AQ_lower=p_WG_lower, p_AQ_upper=p_WG_upper)
+
+    # def AddJacobianConstraint_Joint_To_Plane(ik):
+    #     # calculate the jacobian
+    #     J_G = plant.CalcJacobianSpatialVelocity(
+    #         ik.context(),
+    #         JacobianWrtVariable.kQDot,
+    #         gripper_frame,
+    #         [0,0,0],
+    #         world_frame,
+    #         world_frame
+    #     )
+
+    #     # ensure that when joints 4 and 6 move, they keep the gripper in the desired plane
+    #     prog = ik.get_mutable_prog()
+    #     prog.AddConstraint()
+    #     joint_4 = J_G[:, 3]
+    #     joint_6 = J_G[:, 5]
 
     ik = inverse_kinematics.InverseKinematics(plant)
     q_variables = ik.q() # Get variables for MathematicalProgram
@@ -92,7 +167,6 @@ def create_q_knots(pose_lst):
             frameA=world_frame, frameB=gripper_frame, p_BQ=np.zeros(3),
             p_AQ_lower=p_WG_lower, p_AQ_upper=p_WG_upper)
 
-    print(f"NUM POSES: {len(pose_lst)}")
     for i in range(len(pose_lst)):
         # if i % 100 == 0:
         #     print(i)

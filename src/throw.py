@@ -19,12 +19,12 @@ from .drake_helpers import visualize_transform
 
 def plan_pickup(
     T_world_robotInitial,
-    T_world_gripperObject
+    T_world_gripperObject,
+    t_goToObj = 1.0,
+    t_holdObj = 0.5,
+    t_goToPreobj = 1.0,
 ):
     # returns timings, poses, and q knots necessary for grabbing the object and returning to the original position
-    t_goToObj = 1.0
-    t_holdObj = 0.5
-    t_goToPreobj = 1.0
 
     total_pickup_time = t_goToObj + t_holdObj + t_goToPreobj
 
@@ -44,6 +44,38 @@ def plan_pickup(
 
     return t_lst, q_knots, total_pickup_time
 
+def add_go_to_ja_via_jointinterpolation(
+    ja1,
+    ja2,
+    t_start,
+    t_lst,
+    q_knots,
+    time_interval_s=10.0,
+    hold_time_s=0.0,
+    num_samples = 100,
+    include_end=False,
+):
+    # print(f"--------")
+    # print(f"ja1: {ja1.squeeze()}")
+    # print(f"ja2: {ja2.squeeze()}")
+
+    ts, jas = interpolate_joint_angle(ja1, ja2, time_interval_s - hold_time_s, num_samples, include_end=include_end)
+
+    # add in the hold time at the end position to make sure we've stabilized
+    if not np.isclose(hold_time_s, 0.0):
+        num_hold_samples = 10
+        hold_ts = np.linspace(time_interval_s - hold_time_s, time_interval_s, num_hold_samples, endpoint=False)
+        hold_jas = [ja2 for _ in range(num_hold_samples)]
+        ts = np.append(ts, hold_ts)
+        jas.extend(hold_jas)
+
+    # t start should be the next value in t_list
+    ts += t_start
+    t_lst = np.append(t_lst, ts)
+    q_knots.extend(jas)
+
+    return t_lst, q_knots
+
 def add_go_to_pose_via_jointinterpolation(
     T_world_robotInitial,
     T_world_robotFinal,
@@ -51,7 +83,7 @@ def add_go_to_pose_via_jointinterpolation(
     t_lst,
     q_knots,
     time_interval_s=10.0,
-    hold_time_s=1.0,
+    hold_time_s=0.0,
     do_magic=False
 ):
     ja1 = pose_to_jointangles(T_world_robotInitial)
@@ -61,24 +93,16 @@ def add_go_to_pose_via_jointinterpolation(
         ja2[3] += np.pi / 2
         ja2[5] += np.pi / 2
 
-    print(f"--------")
-    print(f"ja1: {ja1.squeeze()}")
-    print(f"ja2: {ja2.squeeze()}")
-    ts, jas = interpolate_joint_angle(ja1, ja2, time_interval_s - hold_time_s, 100)
+    return add_go_to_ja_via_jointinterpolation(
+        ja1,
+        ja2,
+        t_start=t_start,
+        t_lst=t_lst,
+        q_knots=q_knots,
+        time_interval_s=time_interval_s,
+        hold_time_s=hold_time_s
+    )
 
-    # add in the hold time at the end position to make sure we've stabilized
-    num_hold_samples = 10
-    hold_ts = np.linspace(time_interval_s - hold_time_s, time_interval_s, num_hold_samples, endpoint=False)
-    hold_jas = [ja2 for _ in range(num_hold_samples)]
-    ts = np.append(ts, hold_ts)
-    jas.extend(hold_jas)
-
-    # t start should be the next value in t_list
-    ts += t_start
-    t_lst = np.append(t_lst, ts)
-    q_knots.extend(jas)
-
-    return t_lst, q_knots
 
 def plan_prethrow_pose(
     T_world_robotInitial,
