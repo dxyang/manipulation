@@ -7,7 +7,7 @@ from pydrake.all import (
     Parser, MultibodyPlant, RigidTransform,
     RollPitchYaw, AddTriad,
     PiecewisePolynomial, PiecewiseQuaternionSlerp, RotationMatrix,
-    TrajectorySource,
+    TrajectorySource, SignalLogger
 )
 
 '''
@@ -100,8 +100,20 @@ def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_ta
         T_world_objectInitial)
     station.Finalize()
 
+    station_plant = station.get_multibody_plant()
+
     q_traj_system = builder.AddSystem(TrajectorySource(q_traj))
     g_traj_system = builder.AddSystem(TrajectorySource(g_traj))
+    builder.Connect(q_traj_system.get_output_port(),
+                    station.GetInputPort("iiwa_position"))
+    builder.Connect(g_traj_system.get_output_port(),
+                    station.GetInputPort("wsg_position"))
+
+    state_logger = builder.AddSystem(SignalLogger(31))
+    #builder.Connect(station_plant.GetOutputPort("continuous_state"),
+    #                state_logger.get_input_port())
+    builder.Connect(station.GetOutputPort("plant_continuous_state"),
+                    state_logger.get_input_port())
 
     meshcat = ConnectMeshcatVisualizer(builder,
           station.get_scene_graph(),
@@ -110,15 +122,9 @@ def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_ta
           frames_to_draw={"gripper":{"body"}},
           zmq_url=zmq_url)
 
-    builder.Connect(q_traj_system.get_output_port(),
-                  station.GetInputPort("iiwa_position"))
-    builder.Connect(g_traj_system.get_output_port(),
-                  station.GetInputPort("wsg_position"))
-
     diagram = builder.Build()
 
     simulator = Simulator(diagram)
     simulator.set_target_realtime_rate(1.0)
-    station_plant = station.get_multibody_plant()
 
-    return simulator, station_plant, meshcat
+    return simulator, station_plant, meshcat, state_logger
