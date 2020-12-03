@@ -24,7 +24,7 @@ def visualize_transform(meshcat, name, transform, prefix='', length=0.15, radius
 Core model and environment setup
 '''
 # used for getting the initial pose of the robot
-def setup_manipulation_station(T_world_objectInitial, zmq_url):
+def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin=None):
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=1e-3))
     station.SetupClutterClearingStation()
@@ -32,6 +32,11 @@ def setup_manipulation_station(T_world_objectInitial, zmq_url):
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
         "drake/examples/manipulation_station/models/sphere.sdf",
         T_world_objectInitial)
+    station_plant = station.get_multibody_plant()
+    if T_world_targetBin is not None:
+        parser = Parser(station_plant)
+        parser.AddModelFromFile("extra_bin.sdf")
+        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
     station.Finalize()
 
     frames_to_draw = {"gripper": {"body"}}
@@ -86,7 +91,7 @@ def CreateIiwaControllerPlant():
 
     return plant_robot, link_frame_indices
 
-def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_target, zmq_url):
+def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_target, zmq_url, T_world_targetBin=None):
     """Simulate trajectory for manipulation station.
     @param q_traj: Trajectory class used to initialize TrajectorySource for joints.
     @param g_traj: Trajectory class used to initialize TrajectorySource for gripper.
@@ -98,9 +103,13 @@ def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_ta
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
         "drake/examples/manipulation_station/models/sphere.sdf",
         T_world_objectInitial)
+    station_plant = station.get_multibody_plant()
+    if T_world_targetBin is not None:
+        parser = Parser(station_plant)
+        parser.AddModelFromFile("extra_bin.sdf")
+        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
     station.Finalize()
 
-    station_plant = station.get_multibody_plant()
 
     q_traj_system = builder.AddSystem(TrajectorySource(q_traj))
     g_traj_system = builder.AddSystem(TrajectorySource(g_traj))
@@ -128,3 +137,20 @@ def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_ta
     simulator.set_target_realtime_rate(1.0)
 
     return simulator, station_plant, meshcat, state_logger
+
+if __name__ == "__main__":
+    # Get initial pose of the gripper by using default context of manip station.
+    zmq_url="tcp://127.0.0.1:6019"
+    P_WORLD_TARGET = np.array([-1, 1, 0])
+    GRIPPER_TO_OBJECT_DIST = 0.13 # meters
+
+    T_world_target = RigidTransform(RotationMatrix(), P_WORLD_TARGET)
+    T_world_objectInitial = RigidTransform(
+        p=[-.1, -.69, 1.04998503e-01],
+        R=RotationMatrix.MakeZRotation(np.pi/2.0)
+    )
+    T_world_gripperObject = RigidTransform(
+        p=T_world_objectInitial.translation() + np.array([0, 0, GRIPPER_TO_OBJECT_DIST]),
+        R=RotationMatrix.MakeXRotation(-np.pi/2.0)
+    )
+    T_world_robotInitial, meshcat = setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_target)
