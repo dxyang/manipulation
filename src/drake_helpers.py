@@ -1,11 +1,12 @@
+import collections
 import numpy as np
 from pydrake.examples.manipulation_station import ManipulationStation
 
 import pydrake
 from pydrake.all import (
-    DiagramBuilder, ConnectMeshcatVisualizer, Simulator, FindResourceOrThrow,
-    Parser, MultibodyPlant, RigidTransform,
-    RollPitchYaw, AddTriad,
+    BasicVector, DiagramBuilder, ConnectMeshcatVisualizer, Simulator, FindResourceOrThrow,
+    LeafSystem, Parser, RigidTransform,
+    MultibodyPlant, RollPitchYaw, AddTriad,
     PiecewisePolynomial, PiecewiseQuaternionSlerp, RotationMatrix,
     TrajectorySource, SignalLogger
 )
@@ -23,43 +24,111 @@ def visualize_transform(meshcat, name, transform, prefix='', length=0.15, radius
 '''
 Core model and environment setup
 '''
-# used for getting the initial pose of the robot
-def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin=None):
-    builder = DiagramBuilder()
-    station = builder.AddSystem(ManipulationStation(time_step=1e-3))
-    station.SetupClutterClearingStation()
-    station.AddManipulandFromFile(
-        #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf",
-        T_world_objectInitial)
-    station_plant = station.get_multibody_plant()
-    if T_world_targetBin is not None:
-        parser = Parser(station_plant)
-        parser.AddModelFromFile("extra_bin.sdf")
-        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
-    station.Finalize()
+class GripperControllerUsingIiwaState(LeafSystem):
+    def __init__(
+        self,
+        plant,
+        T_world_objectPickup,
+        T_world_prethrow,
+        T_world_targetRelease,
+        dbg_state_prints=False # turn this to true to get some helfpul dbg prints
+    ):
+        LeafSystem.__init__(self)
+        self._plant = plant
+        self._plant_context = plant.CreateDefaultContext()
+        self._iiwa = plant.GetModelInstanceByName("iiwa")
+        self.gripper = plant.GetBodyByName("body")
 
-    frames_to_draw = {"gripper": {"body"}}
-    meshcat = ConnectMeshcatVisualizer(builder,
-          station.get_scene_graph(),
-          output_port=station.GetOutputPort("pose_bundle"),
-          delete_prefix_on_load=False,
-          frames_to_draw=frames_to_draw,
-          zmq_url=zmq_url)
+        self.q_port = self.DeclareVectorInputPort("iiwa_position", BasicVector(7))
+        self.DeclareVectorOutputPort("wsg_position", BasicVector(1),
+                                     self.CalcGripperTarget)
 
-    diagram = builder.Build()
+        # important poses
+        self.T_world_objectPickup = T_world_objectPickup
+        self.T_world_prethrow = T_world_prethrow
+        self.T_world_targetRelease = T_world_targetRelease
 
-    plant = station.get_multibody_plant()
-    context = plant.CreateDefaultContext()
-    gripper = plant.GetBodyByName("body")
+        # some constants
+        self.GRIPPER_OPEN = np.array([0.5])
+        self.GRIPPER_CLOSED = np.array([0.0])
 
-    initial_pose = plant.EvalBodyPoseInWorld(context, gripper)
+        # states
+        self.gripper_picked_up_object = False
+        self.reached_prethrow = False
+        self.at_or_passed_release = False
 
-    simulator = Simulator(diagram)
-    simulator.set_target_realtime_rate(1.0)
-    simulator.AdvanceTo(0.01)
+        # this helps make sure we're in the right state
+        self.is_robot_stationary = False
+        self.pose_translation_history = collections.deque(maxlen=10)
 
-    return initial_pose, meshcat
+        # determines gripper control based on above logic
+        self.should_close_gripper = False
+        self.dbg_state_prints = dbg_state_prints
+
+    def rigid_transforms_close(self, T_world_poseA, T_world_poseB):
+        r_A, t_A = T_world_poseA.rotation(), T_world_poseA.translation()
+        r_B, t_B = T_world_poseB.rotation(), T_world_poseB.translation()
+
+        # hack, being positionally close should be sufficient
+        return np.allclose(t_A, t_B, rtol=1e-3, atol=1e-3)
+
+    def CalcGripperTarget(self, context, output):
+        q = self.q_port.Eval(context)
+        self._plant.SetPositions(self._plant_context, self._iiwa, q)
+        T_world_robot = self._plant.EvalBodyPoseInWorld(self._plant_context, self.gripper)
+        t = T_world_robot.translation()
+        self.pose_translation_history.append(t)
+
+        # location history to check if the robot is stationary (i.e., pick up object!)
+        if len(self.pose_translation_history) == self.pose_translation_history.maxlen:
+            all_same = True
+            for i in range(len(self.pose_translation_history)):
+                t_0 = self.pose_translation_history[0]
+                t_i = self.pose_translation_history[i]
+                same = np.allclose(t_0, t_i, rtol=1e-3, atol=1e-3)
+                all_same = all_same and same
+            if all_same and not self.is_robot_stationary:
+                if self.dbg_state_prints:
+                    print("ROBOT BECAME STATIONARY")
+            elif not all_same and self.is_robot_stationary:
+                if self.dbg_state_prints:
+                    print("ROBOT STARTED MOVING")
+            self.is_robot_stationary = all_same
+
+        # FSM covering picking up the object, getting to the prethrow, and getting to release
+        if not self.gripper_picked_up_object:
+            # gripper control until we've got the object
+            at_pickup = self.rigid_transforms_close(T_world_robot, self.T_world_objectPickup)
+            if at_pickup:
+                if self.dbg_state_prints:
+                    print(f"WE REACHED THE PICKUP POINT")
+            if at_pickup and self.is_robot_stationary:
+                if self.dbg_state_prints:
+                    print(f"AT PICK UP + ROBOT IS STATIONARY")
+                self.gripper_picked_up_object = True
+                self.should_close_gripper = True
+        elif not self.reached_prethrow:
+            at_prethrow = self.rigid_transforms_close(T_world_robot, self.T_world_prethrow)
+            if at_prethrow:
+                if self.dbg_state_prints:
+                    print(f"WE REACHED THE PRETHROW POINT")
+            if at_prethrow and self.is_robot_stationary:
+                if self.dbg_state_prints:
+                    print(f"AT PRETHROW + ROBOT IS STATIONARY")
+                self.reached_prethrow = True
+        elif not self.at_or_passed_release:
+            at_release = self.rigid_transforms_close(T_world_robot, self.T_world_targetRelease)
+            if at_release:
+                if self.dbg_state_prints:
+                    print(f"AT THE RELEASE POSE")
+                self.at_or_passed_release = True
+                self.should_close_gripper = False
+
+        if self.should_close_gripper:
+            output.SetFromVector(self.GRIPPER_CLOSED)
+        else:
+            output.SetFromVector(self.GRIPPER_OPEN)
+
 
 # manipulation station has a lot of extra things that we don't need for IK
 def CreateIiwaControllerPlant():
@@ -91,7 +160,54 @@ def CreateIiwaControllerPlant():
 
     return plant_robot, link_frame_indices
 
-def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_target, zmq_url, T_world_targetBin=None):
+
+# used for getting the initial pose of the robot
+def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin):
+    builder = DiagramBuilder()
+    station = builder.AddSystem(ManipulationStation(time_step=1e-3))
+    station.SetupClutterClearingStation()
+    station.AddManipulandFromFile(
+        #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
+        "drake/examples/manipulation_station/models/sphere.sdf",
+        T_world_objectInitial)
+    station_plant = station.get_multibody_plant()
+    parser = Parser(station_plant)
+    parser.AddModelFromFile("extra_bin.sdf")
+    station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
+    station.Finalize()
+
+    frames_to_draw = {"gripper": {"body"}}
+    meshcat = ConnectMeshcatVisualizer(builder,
+          station.get_scene_graph(),
+          output_port=station.GetOutputPort("pose_bundle"),
+          delete_prefix_on_load=False,
+          frames_to_draw=frames_to_draw,
+          zmq_url=zmq_url)
+
+    diagram = builder.Build()
+
+    plant = station.get_multibody_plant()
+    context = plant.CreateDefaultContext()
+    gripper = plant.GetBodyByName("body")
+
+    initial_pose = plant.EvalBodyPoseInWorld(context, gripper)
+
+    simulator = Simulator(diagram)
+    simulator.set_target_realtime_rate(1.0)
+    simulator.AdvanceTo(0.01)
+
+    return initial_pose, meshcat
+
+def BuildAndSimulateTrajectory(
+    q_traj,
+    g_traj,
+    zmq_url,
+    T_world_objectInitial,
+    T_world_objectGrasp,
+    T_world_prethrow,
+    T_world_targetRelease,
+    T_world_targetBin
+):
     """Simulate trajectory for manipulation station.
     @param q_traj: Trajectory class used to initialize TrajectorySource for joints.
     @param g_traj: Trajectory class used to initialize TrajectorySource for gripper.
@@ -104,19 +220,28 @@ def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_ta
         "drake/examples/manipulation_station/models/sphere.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
-    if T_world_targetBin is not None:
-        parser = Parser(station_plant)
-        parser.AddModelFromFile("extra_bin.sdf")
-        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
+    parser = Parser(station_plant)
+    parser.AddModelFromFile("extra_bin.sdf")
+    station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
     station.Finalize()
 
-
+    # iiwa joint trajectory - predetermined trajectory
     q_traj_system = builder.AddSystem(TrajectorySource(q_traj))
-    g_traj_system = builder.AddSystem(TrajectorySource(g_traj))
     builder.Connect(q_traj_system.get_output_port(),
                     station.GetInputPort("iiwa_position"))
-    builder.Connect(g_traj_system.get_output_port(),
-                    station.GetInputPort("wsg_position"))
+
+    # gripper trajectory - closed loop controller
+    controller = builder.AddSystem(
+        GripperControllerUsingIiwaState(
+            station_plant,
+            T_world_objectGrasp,
+            T_world_prethrow,
+            T_world_targetRelease
+        )
+    )
+    controller.set_name("GripperControllerUsingIiwaState")
+    builder.Connect(station.GetOutputPort("iiwa_position_measured"), controller.GetInputPort("iiwa_position"))
+    builder.Connect(controller.get_output_port(), station.GetInputPort("wsg_position"))
 
     state_logger = builder.AddSystem(SignalLogger(31))
     #builder.Connect(station_plant.GetOutputPort("continuous_state"),
@@ -139,18 +264,4 @@ def BuildAndSimulateTrajectory(q_traj, g_traj, T_world_objectInitial, T_world_ta
     return simulator, station_plant, meshcat, state_logger
 
 if __name__ == "__main__":
-    # Get initial pose of the gripper by using default context of manip station.
-    zmq_url="tcp://127.0.0.1:6019"
-    P_WORLD_TARGET = np.array([-1, 1, 0])
-    GRIPPER_TO_OBJECT_DIST = 0.13 # meters
-
-    T_world_target = RigidTransform(RotationMatrix(), P_WORLD_TARGET)
-    T_world_objectInitial = RigidTransform(
-        p=[-.1, -.69, 1.04998503e-01],
-        R=RotationMatrix.MakeZRotation(np.pi/2.0)
-    )
-    T_world_gripperObject = RigidTransform(
-        p=T_world_objectInitial.translation() + np.array([0, 0, GRIPPER_TO_OBJECT_DIST]),
-        R=RotationMatrix.MakeXRotation(-np.pi/2.0)
-    )
-    T_world_robotInitial, meshcat = setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_target)
+    pass
