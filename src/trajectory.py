@@ -97,3 +97,15 @@ def get_launch_speed_required(theta, x, y, g=9.81):
     speed_required = x / (np.cos(theta) * time_to_target)
 
     return speed_required
+
+def get_proj_height_at_x(launch_vx, launch_vy, target_x, g=9.81):
+    """
+    Assuming we launch a projectile from (0, 0) with velocity vx, vy,
+    what is the height of the projectile when it reaches x=target_x
+    """
+    if launch_vx <= 0 or target_x < 0:
+        return -np.inf
+
+    time_to_target = target_x / launch_vx
+    height = launch_vy * time_to_target - 0.5 * g * (time_to_target ** 2)
+    return height

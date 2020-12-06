@@ -7,7 +7,10 @@ from pydrake.multibody import inverse_kinematics
 
 from .drake_helpers import CreateIiwaControllerPlant
 
-def spatial_velocity_jacobian_at_jointangles(jointangles):
+def spatial_velocity_jacobian_at_jointangles(
+    jointangles,
+    gripper_to_object_dist
+):
     # returns a 6 x 7 matrix
     # [dw_x, dw_y, dw_z, dv_x, dv_y, dv_z] for each of the 7 joints
 
@@ -29,15 +32,13 @@ def spatial_velocity_jacobian_at_jointangles(jointangles):
     )
     plant_context = plant.GetMyContextFromRoot(context)
 
-    G = plant.GetBodyByName("body").body_frame()
-    W = plant.world_frame()
     J_G = plant.CalcJacobianSpatialVelocity(
         plant_context,
         JacobianWrtVariable.kQDot,
-        G,
-        [0,0,0],
-        W,
-        W
+        plant.GetBodyByName("body").body_frame(),
+        [0, gripper_to_object_dist, 0],
+        plant.world_frame(),
+        plant.world_frame()
     )
     return J_G[:, :7]
 
