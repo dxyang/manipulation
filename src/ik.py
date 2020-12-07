@@ -5,7 +5,7 @@ from pydrake.all import DiagramBuilder, JacobianWrtVariable, RigidTransform, Rot
 from pydrake.examples.manipulation_station import ManipulationStation
 from pydrake.multibody import inverse_kinematics
 
-from .drake_helpers import CreateIiwaControllerPlant
+from .drake_helpers import CreateIiwaControllerPlant, visualize_transform
 
 def spatial_velocity_jacobian_at_jointangles(
     jointangles,
