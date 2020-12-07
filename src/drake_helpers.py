@@ -156,7 +156,7 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
                                      self.CalcGripperTarget)
 
         # important pose info
-        self.gripper_to_object_dist = gripper_to_object_dist - 0.04 # ball radius of 4 cm
+        self.gripper_to_object_dist = gripper_to_object_dist
         self.T_world_objectPickup = T_world_objectPickup
         self.T_world_prethrow = T_world_prethrow
         self.p_world_target = p_world_target
@@ -249,7 +249,7 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
             ) + p_proj[2]
 
             if self.dbg_state_prints:
-                if proj_height_at_target - self.p_world_target[2] > -0.5:
+                if proj_height_at_target - self.p_world_target[2] > self.height_thresh - 1:
                     print(
                         f"p={p_proj}",
                         f"v={v_proj}",
@@ -347,7 +347,8 @@ def BuildAndSimulateTrajectory(
     T_world_objectInitial,
     T_world_targetBin,
     zmq_url,
-    time_step
+    time_step,
+    include_target_bin=True,
 ):
     """Simulate trajectory for manipulation station.
     @param q_traj: Trajectory class used to initialize TrajectorySource for joints.
@@ -361,9 +362,10 @@ def BuildAndSimulateTrajectory(
         "drake/examples/manipulation_station/models/sphere.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
-    parser = Parser(station_plant)
-    parser.AddModelFromFile("extra_bin.sdf")
-    station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
+    if include_target_bin:
+        parser = Parser(station_plant)
+        parser.AddModelFromFile("extra_bin.sdf")
+        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
     station.Finalize()
 
     # iiwa joint trajectory - predetermined trajectory
@@ -378,9 +380,14 @@ def BuildAndSimulateTrajectory(
     builder.Connect(station.GetOutputPort("iiwa_velocity_estimated"), gctlr.GetInputPort("iiwa_velocity"))
     builder.Connect(gctlr.get_output_port(), station.GetInputPort("wsg_position"))
 
-    state_logger = builder.AddSystem(SignalLogger(31))
+    loggers = dict(
+        state=builder.AddSystem(SignalLogger(31)),
+        v_est=builder.AddSystem(SignalLogger(7))
+    )
     builder.Connect(station.GetOutputPort("plant_continuous_state"),
-                    state_logger.get_input_port())
+                    loggers["state"].get_input_port())
+    builder.Connect(station.GetOutputPort("iiwa_velocity_estimated"),
+                    loggers["v_est"].get_input_port())
 
     meshcat = ConnectMeshcatVisualizer(builder,
           station.get_scene_graph(),
@@ -394,7 +401,7 @@ def BuildAndSimulateTrajectory(
     simulator = Simulator(diagram)
     simulator.set_target_realtime_rate(1.0)
 
-    return simulator, station_plant, meshcat, state_logger
+    return simulator, station_plant, meshcat, loggers
 
 if __name__ == "__main__":
     pass
