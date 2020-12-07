@@ -137,7 +137,7 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
     def __init__(
         self,
         plant,
-        gipper_to_object_dist,
+        gripper_to_object_dist,
         T_world_objectPickup,
         T_world_prethrow,
         p_world_target,
@@ -156,7 +156,7 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
                                      self.CalcGripperTarget)
 
         # important pose info
-        self.gipper_to_object_dist = gipper_to_object_dist
+        self.gripper_to_object_dist = gripper_to_object_dist - 0.04 # ball radius of 4 cm
         self.T_world_objectPickup = T_world_objectPickup
         self.T_world_prethrow = T_world_prethrow
         self.p_world_target = p_world_target
@@ -227,14 +227,14 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
                 self._plant_context,
                 JacobianWrtVariable.kQDot,
                 self.gripper.body_frame(),
-                [0, self.gipper_to_object_dist, 0],
+                [0, self.gripper_to_object_dist, 0],
                 self._plant.world_frame(),
                 self._plant.world_frame()
             )[:, 7:14] # TODO: Fixme: This is hardcoded and is flaky.
             v_proj = J_robot @ qdot
             p_proj = (
                 T_world_robot.translation()
-              + T_world_robot.rotation().multiply([0, self.gipper_to_object_dist, 0])
+              + T_world_robot.rotation().multiply([0, self.gripper_to_object_dist, 0])
             )
 
             # Assume p_proj, v_proj, self.p_world_target are aligned
@@ -346,14 +346,15 @@ def BuildAndSimulateTrajectory(
     get_gripper_controller,
     T_world_objectInitial,
     T_world_targetBin,
-    zmq_url
+    zmq_url,
+    time_step
 ):
     """Simulate trajectory for manipulation station.
     @param q_traj: Trajectory class used to initialize TrajectorySource for joints.
     @param g_traj: Trajectory class used to initialize TrajectorySource for gripper.
     """
     builder = DiagramBuilder()
-    station = builder.AddSystem(ManipulationStation(time_step=1e-3))
+    station = builder.AddSystem(ManipulationStation(time_step=time_step)) #1e-3 or 1e-4 probably
     station.SetupClutterClearingStation()
     station.AddManipulandFromFile(
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
