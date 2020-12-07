@@ -74,7 +74,7 @@ class GripperControllerUsingIiwaState(LeafSystem):
         r_B, t_B = T_world_poseB.rotation(), T_world_poseB.translation()
 
         # hack, being positionally close should be sufficient
-        return np.allclose(t_A, t_B, rtol=1e-3, atol=1e-3)
+        return np.allclose(t_A, t_B, rtol=2e-3, atol=2e-3)
 
     def CalcGripperTarget(self, context, output):
         q = self.q_port.Eval(context)
@@ -121,6 +121,7 @@ class GripperControllerUsingIiwaState(LeafSystem):
                     print(f"AT PRETHROW + ROBOT IS STATIONARY")
                 self.reached_prethrow = True
         elif not self.at_or_passed_release:
+            print(f"curr: {T_world_robot.translation().squeeze()} target: {self.T_world_targetRelease.translation().squeeze()}")
             at_release = self.rigid_transforms_close(T_world_robot, self.T_world_targetRelease)
             if at_release:
                 if self.dbg_state_prints:
@@ -304,13 +305,13 @@ def CreateIiwaControllerPlant():
 
 
 # used for getting the initial pose of the robot
-def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin):
+def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin, obj_str="ball"):
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=1e-3))
     station.SetupClutterClearingStation()
     station.AddManipulandFromFile(
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf",
+        "drake/examples/manipulation_station/models/sphere.sdf" if obj_str is "ball" else "drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
@@ -347,7 +348,8 @@ def BuildAndSimulateTrajectory(
     T_world_objectInitial,
     T_world_targetBin,
     zmq_url,
-    time_step
+    time_step,
+    obj_str="ball"
 ):
     """Simulate trajectory for manipulation station.
     @param q_traj: Trajectory class used to initialize TrajectorySource for joints.
@@ -358,7 +360,7 @@ def BuildAndSimulateTrajectory(
     station.SetupClutterClearingStation()
     station.AddManipulandFromFile(
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf",
+        "drake/examples/manipulation_station/models/sphere.sdf" if obj_str is "ball" else "drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
