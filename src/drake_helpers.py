@@ -459,14 +459,22 @@ def CreateIiwaControllerPlant():
 
 
 # used for getting the initial pose of the robot
-def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin):
+def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin, manipuland="foam"):
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=1e-3))
     station.SetupClutterClearingStation()
-    station.AddManipulandFromFile(
-        "drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        #"drake/examples/manipulation_station/models/sphere.sdf",
-        T_world_objectInitial)
+    if manipuland is "foam":
+        station.AddManipulandFromFile(
+            "drake/examples/manipulation_station/models/061_foam_brick.sdf",
+            T_world_objectInitial)
+    elif manipuland is "ball":
+        station.AddManipulandFromFile(
+            "drake/examples/manipulation_station/models/sphere.sdf",
+            T_world_objectInitial)
+    elif manipuland is "rod":
+        station.AddManipulandFromFile(
+            "drake/examples/manipulation_station/models/rod.sdf",
+            T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
     parser.AddModelFromFile("extra_bin.sdf")
@@ -504,6 +512,7 @@ def BuildAndSimulateTrajectory(
     zmq_url,
     time_step,
     include_target_bin=True,
+    manipuland="foam"
 ):
     """Simulate trajectory for manipulation station.
     @param q_traj: Trajectory class used to initialize TrajectorySource for joints.
@@ -512,10 +521,18 @@ def BuildAndSimulateTrajectory(
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=time_step)) #1e-3 or 1e-4 probably
     station.SetupClutterClearingStation()
-    station.AddManipulandFromFile(
-        "drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        #"drake/examples/manipulation_station/models/sphere.sdf",
-        T_world_objectInitial)
+    if manipuland is "foam":
+        station.AddManipulandFromFile(
+            "drake/examples/manipulation_station/models/061_foam_brick.sdf",
+            T_world_objectInitial)
+    elif manipuland is "ball":
+        station.AddManipulandFromFile(
+            "drake/examples/manipulation_station/models/sphere.sdf",
+            T_world_objectInitial)
+    elif manipuland is "rod":
+        station.AddManipulandFromFile(
+            "drake/examples/manipulation_station/models/rod.sdf",
+            T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     if include_target_bin:
         parser = Parser(station_plant)
