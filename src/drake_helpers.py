@@ -381,10 +381,6 @@ class GripperControllerUsingIiwaStateV3(LeafSystem):
                 self._plant.world_frame()
             )[:, 7:14] # TODO: Fixme: This is hardcoded and is flaky.
             v_proj = J_robot @ qdot
-            p_proj = (
-                T_world_robot.translation()
-              + T_world_robot.rotation().multiply([0, self.gripper_to_object_dist, 0])
-            )
 
             # Assume p_proj, v_proj, self.p_world_target are aligned
             # assert np.abs(np.cross(v_porj, self.p_world_target - p_proj)).max() < 1e-3
