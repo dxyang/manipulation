@@ -11,6 +11,7 @@ from pydrake.all import (
     TrajectorySource, SignalLogger,
     JacobianWrtVariable
 )
+from pydrake.examples.manipulation_station import SchunkCollisionModel
 
 from .trajectory import get_proj_height_at_x
 
@@ -308,10 +309,11 @@ def CreateIiwaControllerPlant():
 def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin, obj_str="ball"):
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=1e-3))
-    station.SetupClutterClearingStation()
+    #station.SetupClutterClearingStation()
+    station.SetupClutterClearingStation(schunk_model=SchunkCollisionModel.kBoxPlusFingertipSpheres)
     station.AddManipulandFromFile(
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf" if obj_str is "ball" else "drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf",
+        "drake/examples/manipulation_station/models/sphere.sdf" if obj_str is "ball" else "drake/examples/manipulation_station/models/rod.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
@@ -358,9 +360,10 @@ def BuildAndSimulateTrajectory(
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=time_step)) #1e-3 or 1e-4 probably
     station.SetupClutterClearingStation()
+    # station.SetupClutterClearingStation(schunk_model=SchunkCollisionModel.kBoxPlusFingertipSpheres)
     station.AddManipulandFromFile(
         #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf" if obj_str is "ball" else "drake/manipulation/models/ycb/sdf/006_mustard_bottle.sdf",
+        "drake/examples/manipulation_station/models/sphere.sdf" if obj_str is "ball" else "drake/examples/manipulation_station/models/rod.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
