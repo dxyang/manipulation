@@ -468,8 +468,8 @@ def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin
     station = builder.AddSystem(ManipulationStation(time_step=1e-3))
     station.SetupClutterClearingStation()
     station.AddManipulandFromFile(
-        #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf",
+        "drake/examples/manipulation_station/models/061_foam_brick.sdf",
+        #"drake/examples/manipulation_station/models/sphere.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
@@ -517,8 +517,8 @@ def BuildAndSimulateTrajectory(
     station = builder.AddSystem(ManipulationStation(time_step=time_step)) #1e-3 or 1e-4 probably
     station.SetupClutterClearingStation()
     station.AddManipulandFromFile(
-        #"drake/examples/manipulation_station/models/061_foam_brick.sdf",
-        "drake/examples/manipulation_station/models/sphere.sdf",
+        "drake/examples/manipulation_station/models/061_foam_brick.sdf",
+        #"drake/examples/manipulation_station/models/sphere.sdf",
         T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     if include_target_bin:
