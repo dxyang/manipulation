@@ -83,6 +83,16 @@ def interpolate_joint_angle(ja1, ja2, time_interval, num_samples, include_end=Fa
 
     return t_lst, ja_list
 
+def get_launch_angle_required(approach_angle, x, y):
+    """
+    What angle to we need to launch from (0, 0)
+    to hit (x, y) at approach_angle?
+    Surprisingly, this does not depend on g!
+    """
+    assert 0 < x
+    assert np.abs(approach_angle) < np.pi / 2
+    assert y - x * np.tan(approach_angle) > 0
+    return np.arctan(2.0 * y / x - np.tan(approach_angle))
 
 def get_launch_speed_required(theta, x, y, g=9.81):
     """

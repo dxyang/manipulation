@@ -8,6 +8,7 @@ from pydrake.multibody import inverse_kinematics
 from .drake_helpers import CreateIiwaControllerPlant, visualize_transform
 
 def spatial_velocity_jacobian_at_jointangles(
+    plant, context,
     jointangles,
     gripper_to_object_dist
 ):
@@ -18,13 +19,6 @@ def spatial_velocity_jacobian_at_jointangles(
     ja = np.array(jointangles).squeeze()
     assert(ja.shape == (7,))
 
-    builder = DiagramBuilder()
-    station = builder.AddSystem(ManipulationStation())
-    station.SetupClutterClearingStation()
-    station.Finalize()
-    diagram = builder.Build()
-    context = diagram.CreateDefaultContext()
-    plant = station.get_multibody_plant()
     plant.SetPositions(
         plant.GetMyContextFromRoot(context),
         plant.GetModelInstanceByName("iiwa"),
@@ -42,26 +36,19 @@ def spatial_velocity_jacobian_at_jointangles(
     )
     return J_G[:, :7]
 
-def jointangles_to_pose(jointangles):
+def jointangles_to_pose(plant, context, jointangles):
     # jointangles should be a numpy array or list of joint angles of length 7
-    ja = np.array(jointangles).squeeze()
+    #ja = np.array(jointangles).squeeze()
+    ja = jointangles
     assert(ja.shape == (7,))
 
-    builder = DiagramBuilder()
-    station = builder.AddSystem(ManipulationStation())
-    station.SetupClutterClearingStation()
-    station.Finalize()
-    diagram = builder.Build()
-    context = diagram.CreateDefaultContext()
-    plant = station.get_multibody_plant()
-    gripper = plant.GetBodyByName("body")
     plant.SetPositions(
         plant.GetMyContextFromRoot(context),
         plant.GetModelInstanceByName("iiwa"),
         ja
     )
     plant_context = plant.GetMyContextFromRoot(context)
-    pose = plant.EvalBodyPoseInWorld(plant_context, gripper)
+    pose = plant.EvalBodyPoseInWorld(plant_context, plant.GetBodyByName("body"))
     return pose
 
 def pose_to_jointangles(T_world_robotPose):

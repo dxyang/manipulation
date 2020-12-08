@@ -141,7 +141,9 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
         T_world_objectPickup,
         T_world_prethrow,
         p_world_target,
-        height_thresh=0,
+        planned_launch_angle,
+        height_thresh=0.03,
+        launch_angle_thresh=0.1,
         dbg_state_prints=False # turn this to true to get some helfpul dbg prints
     ):
         LeafSystem.__init__(self)
@@ -160,7 +162,9 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
         self.T_world_objectPickup = T_world_objectPickup
         self.T_world_prethrow = T_world_prethrow
         self.p_world_target = p_world_target
+        self.planned_launch_angle = planned_launch_angle
         self.height_thresh = height_thresh
+        self.launch_angle_thresh = launch_angle_thresh
 
         # some constants
         self.GRIPPER_OPEN = np.array([0.5])
@@ -242,24 +246,167 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
             # Then convert problem to 2d
             launch_vx = np.linalg.norm(v_proj[:2])
             launch_vy = np.linalg.norm(v_proj[2])
+            launch_angle = np.arctan2(launch_vy, launch_vx)
             dx = np.linalg.norm(self.p_world_target[:2] - p_proj[:2])
 
             proj_height_at_target = get_proj_height_at_x(
                 launch_vx=launch_vx, launch_vy=launch_vy, target_x=dx
             ) + p_proj[2]
 
+            # Only launch if our angle is close enough to the desired angle
+            if launch_angle > self.planned_launch_angle - self.launch_angle_thresh:
+                if self.dbg_state_prints:
+                    if (
+                        np.abs(proj_height_at_target - self.p_world_target[2])
+                        < self.height_thresh + 1
+                    ):
+                        print(
+                            f"p={p_proj}",
+                            f"v={v_proj}",
+                            f"v2d=({launch_vx:.2f}, {launch_vy:.2f})",
+                            f"x={dx:.2f}",
+                            f"ys=({proj_height_at_target:.2f}, {self.p_world_target[2]})",
+                        )
+
+                # Release if our projected throw lands close to target
+                if (
+                    np.abs(proj_height_at_target - self.p_world_target[2])
+                    < self.height_thresh
+                ):
+                    self.at_or_passed_release = True
+                    self.should_close_gripper = False
+                    if self.dbg_state_prints:
+                        print(f"RELEASING!")
+
+
+        if self.should_close_gripper:
+            output.SetFromVector(self.GRIPPER_CLOSED)
+        else:
+            output.SetFromVector(self.GRIPPER_OPEN)
+
+class GripperControllerUsingIiwaStateV3(LeafSystem):
+    def __init__(
+        self,
+        plant,
+        gripper_to_object_dist,
+        T_world_objectPickup,
+        T_world_prethrow,
+        planned_launch_angle,
+        launch_angle_thresh=0,
+        dbg_state_prints=False # turn this to true to get some helfpul dbg prints
+    ):
+        LeafSystem.__init__(self)
+        self._plant = plant
+        self._plant_context = plant.CreateDefaultContext()
+        self._iiwa = plant.GetModelInstanceByName("iiwa")
+        self.gripper = plant.GetBodyByName("body")
+
+        self.q_port = self.DeclareVectorInputPort("iiwa_position", BasicVector(7))
+        self.qdot_port = self.DeclareVectorInputPort("iiwa_velocity", BasicVector(7))
+        self.DeclareVectorOutputPort("wsg_position", BasicVector(1),
+                                     self.CalcGripperTarget)
+
+        # important pose info
+        self.gripper_to_object_dist = gripper_to_object_dist
+        self.T_world_objectPickup = T_world_objectPickup
+        self.T_world_prethrow = T_world_prethrow
+        self.planned_launch_angle = planned_launch_angle
+        self.launch_angle_thresh = launch_angle_thresh
+
+        # some constants
+        self.GRIPPER_OPEN = np.array([0.5])
+        self.GRIPPER_CLOSED = np.array([0.0])
+
+        # states
+        self.gripper_picked_up_object = False
+        self.reached_prethrow = False
+        self.at_or_passed_release = False
+
+        # this helps make sure we're in the right state
+        self.is_robot_stationary = False
+        self.translation_history = np.zeros(shape=(10, 3))
+        self.translation_history_idx = 0
+
+        # determines gripper control based on above logic
+        self.should_close_gripper = False
+        self.dbg_state_prints = dbg_state_prints
+
+    def translations_close(self, T_world_poseA, T_world_poseB, tol=1e-3):
+        t_A = T_world_poseA.translation()
+        t_B = T_world_poseB.translation()
+        return np.allclose(t_A, t_B, rtol=tol, atol=tol)
+
+    def CalcGripperTarget(self, context, output):
+        q = self.q_port.Eval(context)
+        qdot = self.qdot_port.Eval(context)
+
+        self._plant.SetPositions(self._plant_context, self._iiwa, q)
+        T_world_robot = self._plant.EvalBodyPoseInWorld(self._plant_context, self.gripper)
+
+        # location history to check if the robot is stationary (i.e., pick up object!)
+        self.translation_history[
+            self.translation_history_idx % self.translation_history.shape[0]
+        ] = T_world_robot.translation()
+        self.translation_history_idx += 1
+        if self.translation_history_idx >= self.translation_history.shape[0]:
+            all_same = np.abs(
+                self.translation_history.max(axis=0)
+              - self.translation_history.min(axis=0)
+            ).max() < 1e-3
+
             if self.dbg_state_prints:
-                if proj_height_at_target - self.p_world_target[2] > self.height_thresh - 1:
+                if all_same != self.is_robot_stationary:
+                    print(f"ROBOT BECAME {'STATIONARY' if all_same else 'MOVING'}")
+
+            self.is_robot_stationary = all_same
+
+        # FSM covering picking up the object, getting to the prethrow, and getting to release
+        if not self.gripper_picked_up_object:
+            # gripper control until we've got the object
+            at_pickup = self.translations_close(T_world_robot, self.T_world_objectPickup)
+            if at_pickup and self.is_robot_stationary:
+                self.gripper_picked_up_object = True
+                self.should_close_gripper = True
+        elif not self.reached_prethrow:
+            at_prethrow = self.translations_close(T_world_robot, self.T_world_prethrow)
+            if at_prethrow and self.is_robot_stationary:
+                self.reached_prethrow = True
+        elif not self.at_or_passed_release:
+            J_robot = self._plant.CalcJacobianTranslationalVelocity(
+                self._plant_context,
+                JacobianWrtVariable.kQDot,
+                self.gripper.body_frame(),
+                [0, self.gripper_to_object_dist, 0],
+                self._plant.world_frame(),
+                self._plant.world_frame()
+            )[:, 7:14] # TODO: Fixme: This is hardcoded and is flaky.
+            v_proj = J_robot @ qdot
+            p_proj = (
+                T_world_robot.translation()
+              + T_world_robot.rotation().multiply([0, self.gripper_to_object_dist, 0])
+            )
+
+            # Assume p_proj, v_proj, self.p_world_target are aligned
+            # assert np.abs(np.cross(v_porj, self.p_world_target - p_proj)).max() < 1e-3
+            # Then convert problem to 2d
+            launch_vx = np.linalg.norm(v_proj[:2])
+            launch_vy = np.linalg.norm(v_proj[2])
+            launch_angle = np.arctan2(launch_vy, launch_vx)
+
+            if self.dbg_state_prints:
+                if (
+                    launch_angle - self.planned_launch_angle
+                  > self.launch_angle_thresh - 0.1
+                ):
                     print(
-                        f"p={p_proj}",
-                        f"v={v_proj}",
+                        #f"p={p_proj}",
+                        #f"v={v_proj}",
                         f"v2d=({launch_vx:.2f}, {launch_vy:.2f})",
-                        f"x={dx:.2f}",
-                        f"ys=({proj_height_at_target:.2f}, {self.p_world_target[2]})",
+                        f"launch_angles=({launch_angle*180/np.pi:.2f}, {self.planned_launch_angle*180/np.pi:.2f})",
                     )
 
-            # Release if we would throw hard enough to get to target
-            if proj_height_at_target - self.p_world_target[2] > self.height_thresh:
+            # Launch when angle is high enough
+            if launch_angle - self.planned_launch_angle > self.launch_angle_thresh:
                 self.at_or_passed_release = True
                 self.should_close_gripper = False
                 if self.dbg_state_prints:
@@ -270,6 +417,18 @@ class GripperControllerUsingIiwaStateV2(LeafSystem):
             output.SetFromVector(self.GRIPPER_CLOSED)
         else:
             output.SetFromVector(self.GRIPPER_OPEN)
+
+def get_basic_manip_station():
+    """Used for IK"""
+    builder = DiagramBuilder()
+    station = builder.AddSystem(ManipulationStation())
+    station.SetupClutterClearingStation()
+    station.Finalize()
+    diagram = builder.Build()
+    context = diagram.CreateDefaultContext()
+    plant = station.get_multibody_plant()
+
+    return plant, context
 
 
 # manipulation station has a lot of extra things that we don't need for IK
