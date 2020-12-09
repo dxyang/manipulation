@@ -482,12 +482,14 @@ def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin
     station.Finalize()
 
     frames_to_draw = {"gripper": {"body"}}
-    meshcat = ConnectMeshcatVisualizer(builder,
-          station.get_scene_graph(),
-          output_port=station.GetOutputPort("pose_bundle"),
-          delete_prefix_on_load=False,
-          frames_to_draw=frames_to_draw,
-          zmq_url=zmq_url)
+    meshcat = None
+    if zmq_url is not None:
+        meshcat = ConnectMeshcatVisualizer(builder,
+            station.get_scene_graph(),
+            output_port=station.GetOutputPort("pose_bundle"),
+            delete_prefix_on_load=False,
+            frames_to_draw=frames_to_draw,
+            zmq_url=zmq_url)
 
     diagram = builder.Build()
 
@@ -561,12 +563,14 @@ def BuildAndSimulateTrajectory(
     builder.Connect(station.GetOutputPort("iiwa_velocity_estimated"),
                     loggers["v_est"].get_input_port())
 
-    meshcat = ConnectMeshcatVisualizer(builder,
-          station.get_scene_graph(),
-          output_port=station.GetOutputPort("pose_bundle"),
-          delete_prefix_on_load=True,
-          frames_to_draw={"gripper":{"body"}},
-          zmq_url=zmq_url)
+    meshcat = None
+    if zmq_url is not None:
+        meshcat = ConnectMeshcatVisualizer(builder,
+            station.get_scene_graph(),
+            output_port=station.GetOutputPort("pose_bundle"),
+            delete_prefix_on_load=True,
+            frames_to_draw={"gripper":{"body"}},
+            zmq_url=zmq_url)
 
     diagram = builder.Build()
 
