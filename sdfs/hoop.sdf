@@ -1,0 +1,98 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="hoop_model">
+    <!--
+    Axes:
+      +X - Pointing towards front (slope)
+      +Y - Pointing to left side
+      +Z - Up
+    Origin:
+      (0, 0, 0) at the center bottom of the bin
+    -->
+    <link name="base_link_hoop">
+      <inertial>
+        <mass>0.603000</mass>
+        <inertia>
+          <ixx>0.002009</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.000633</iyy>
+          <iyz>0</iyz>
+          <izz>0.002302</izz>
+        </inertia>
+      </inertial>
+      <visual name="base_link_hoop">
+        <pose>-0.43 0.0 -1.2 1.57079632679 0.0 1.57079632679</pose>
+        <geometry>
+          <mesh>
+            <uri>basketball_hoop.obj</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <!-- <visual name="slope_netback">
+        <pose>-0.15 0.0 -0.2 0 -0.25 0</pose>
+        <geometry>
+          <box>
+            <size>0.05 0.6 0.4</size>
+          </box>
+        </geometry>
+      </visual> -->
+      <collision name="slope_netback">
+        <pose>-0.15 0.0 -0.2 0 -0.25 0</pose>
+        <geometry>
+          <box>
+            <size>0.05 0.6 0.4</size>
+          </box>
+        </geometry>
+      </collision>
+      <!-- <visual name="slope_netfront">
+        <pose>0.15 0.0 -0.2 0 0.25 0</pose>
+        <geometry>
+          <box>
+            <size>0.05 0.6 0.4</size>
+          </box>
+        </geometry>
+      </visual> -->
+      <collision name="slope_netfront">
+        <pose>0.15 0.0 -0.2 0 0.25 0</pose>
+        <geometry>
+          <box>
+            <size>0.05 0.6 0.4</size>
+          </box>
+        </geometry>
+      </collision>
+      <!-- <visual name="slope_netleft">
+        <pose>0 -0.15 -0.2 0.25 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.6 0.05 0.4</size>
+          </box>
+        </geometry>
+      </visual> -->
+      <collision name="slope_netleft">
+        <pose>0 -0.15 -0.2 0.25 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.6 0.05 0.4</size>
+          </box>
+        </geometry>
+      </collision>
+      <!-- <visual name="slope_netright">
+        <pose>0 0.15 -0.2 -0.25 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.6 0.05 0.4</size>
+          </box>
+        </geometry>
+      </visual> -->
+      <collision name="slope_netright">
+        <pose>0 0.15 -0.2 -0.25 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.6 0.05 0.4</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>

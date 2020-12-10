@@ -459,7 +459,7 @@ def CreateIiwaControllerPlant():
 
 
 # used for getting the initial pose of the robot
-def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin, manipuland="foam"):
+def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin, manipuland="foam", include_bin=True, include_hoop=False):
     builder = DiagramBuilder()
     station = builder.AddSystem(ManipulationStation(time_step=1e-3))
     station.SetupClutterClearingStation()
@@ -471,14 +471,22 @@ def setup_manipulation_station(T_world_objectInitial, zmq_url, T_world_targetBin
         station.AddManipulandFromFile(
             "drake/examples/manipulation_station/models/sphere.sdf",
             T_world_objectInitial)
+    elif manipuland is "bball":
+        station.AddManipulandFromFile(
+            "drake/../../../../../../manipulation/sdfs/bball.sdf", # this is some path hackery
+            T_world_objectInitial)
     elif manipuland is "rod":
         station.AddManipulandFromFile(
             "drake/examples/manipulation_station/models/rod.sdf",
             T_world_objectInitial)
     station_plant = station.get_multibody_plant()
     parser = Parser(station_plant)
-    parser.AddModelFromFile("extra_bin.sdf")
-    station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
+    if include_bin:
+        parser.AddModelFromFile("extra_bin.sdf")
+        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
+    if include_hoop:
+        parser.AddModelFromFile("sdfs/hoop.sdf")
+        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("base_link_hoop"), T_world_targetBin)
     station.Finalize()
 
     frames_to_draw = {"gripper": {"body"}}
@@ -514,6 +522,7 @@ def BuildAndSimulateTrajectory(
     zmq_url,
     time_step,
     include_target_bin=True,
+    include_hoop=False,
     manipuland="foam"
 ):
     """Simulate trajectory for manipulation station.
@@ -531,15 +540,22 @@ def BuildAndSimulateTrajectory(
         station.AddManipulandFromFile(
             "drake/examples/manipulation_station/models/sphere.sdf",
             T_world_objectInitial)
+    elif manipuland is "bball":
+        station.AddManipulandFromFile(
+            "drake/../../../../../../manipulation/sdfs/bball.sdf", # this is some path hackery
+            T_world_objectInitial)
     elif manipuland is "rod":
         station.AddManipulandFromFile(
             "drake/examples/manipulation_station/models/rod.sdf",
             T_world_objectInitial)
     station_plant = station.get_multibody_plant()
+    parser = Parser(station_plant)
     if include_target_bin:
-        parser = Parser(station_plant)
-        parser.AddModelFromFile("extra_bin.sdf")
+        parser.AddModelFromFile("sdfs/extra_bin.sdf")
         station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("extra_bin_base"), T_world_targetBin)
+    if include_hoop:
+        parser.AddModelFromFile("sdfs/hoop.sdf")
+        station_plant.WeldFrames(station_plant.world_frame(), station_plant.GetFrameByName("base_link_hoop"), T_world_targetBin)
     station.Finalize()
 
     # iiwa joint trajectory - predetermined trajectory
